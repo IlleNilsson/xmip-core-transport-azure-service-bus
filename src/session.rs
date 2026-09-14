@@ -17,14 +17,15 @@ use std::time::Duration;
 
 use serde_json::json;
 use transport::Arrived;
-use transport::error::{Result, protocol_error};
-use transport::socket;
+use transport::error::Result;
 
 use crate::ceiling;
 use crate::client::chosen_id;
-use crate::rest::{self, BROKER_PROPERTIES, subcode};
-use crate::sas::{self, Signer, Token};
-use http::message::{self, Request, Response};
+use crate::properties::{self, BROKER_PROPERTIES};
+use http::message::{Request, Response};
+use http::namespace::{self, subcode};
+use http::sas::{self, Signer, Token};
+use http::server;
 
 /// What the client did, as [`Session::serve_one`] reports it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -98,13 +99,7 @@ impl Session {
     /// # Errors
     /// Where the connection could not be accepted, broke, or sent nothing.
     pub fn serve_one(&mut self, listener: &TcpListener) -> Result<Event> {
-        let (stream, _) = socket::accept_tcp(listener, self.timeout)?;
-        let (mut reader, mut writer) = socket::split(stream)?;
-        let request = message::read_request(&mut reader)?
-            .ok_or_else(|| protocol_error("a connection that sent no request"))?;
-        let (event, response) = self.answer(&request);
-        message::write_response(&mut writer, &response)?;
-        Ok(event)
+        server::serve_one(listener, self.timeout, |request| self.answer(request))
     }
 
     fn answer(&mut self, request: &Request) -> (Event, Response) {
@@ -133,7 +128,7 @@ impl Session {
                 &format!("40000: A message is at most {} bytes", ceiling()),
             );
         }
-        let properties = match rest::properties_of(request) {
+        let properties = match properties::properties_of(request) {
             Ok(properties) => properties,
             Err(failure) => return refused(400, &format!("40000: {}", failure.message)),
         };
@@ -242,7 +237,10 @@ fn locked(queue: &str, id: Option<String>, wait: u8) -> Event {
 }
 
 fn refused(status: u16, detail: &str) -> (Event, Response) {
-    (Event::Refused(subcode(detail)), rest::error(status, detail))
+    (
+        Event::Refused(subcode(detail)),
+        namespace::error(status, detail),
+    )
 }
 
 #[cfg(test)]
@@ -284,7 +282,7 @@ mod tests {
         let (event, response) = session.answer(&peek);
         assert_eq!(response.status, 201);
         assert_eq!(response.body, b"a<b");
-        let properties = rest::properties_in(&response).expect("properties");
+        let properties = properties::properties_in(&response).expect("properties");
         assert_eq!(properties["MessageId"], "00000001-xmip");
         assert_eq!(properties["SequenceNumber"], 1);
         let lock = properties["LockToken"]

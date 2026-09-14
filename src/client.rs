@@ -14,10 +14,11 @@ use std::time::Duration;
 use serde_json::Value;
 use transport::error::{Result, protocol_error};
 
-use crate::rest::{self, property};
-use crate::sas::{self, Signer};
+use crate::properties::{self, property};
 use http::endpoint;
 use http::message::{self, Request, Response};
+use http::namespace;
+use http::sas::{self, Signer};
 
 /// The most seconds one peek-lock waits for a message: what the service
 /// allows a `timeout` to be.
@@ -92,7 +93,7 @@ impl Client {
         if answer.status == 204 {
             return Ok(None);
         }
-        let properties = rest::properties_in(&answer)?;
+        let properties = properties::properties_in(&answer)?;
         let named = |name: &str| {
             property(&properties, name)
                 .map(str::to_string)
@@ -122,7 +123,7 @@ impl Client {
         let expiry = sas::now() + sas::LIFETIME;
         let signed = self.signer.sign(request, &self.resource(queue), expiry);
         let stream = endpoint::connect(&self.endpoint, self.timeout)?;
-        rest::judge("Service Bus", message::exchange(stream, &signed)?)
+        namespace::judge("Service Bus", message::exchange(stream, &signed)?)
     }
 }
 

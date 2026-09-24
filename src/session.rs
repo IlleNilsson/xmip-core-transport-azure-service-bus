@@ -22,9 +22,9 @@ use transport::error::Result;
 use crate::ceiling;
 use crate::client::chosen_id;
 use crate::properties::{self, BROKER_PROPERTIES};
+use azure::namespace::{self, subcode};
+use azure::sas::{self, Signer, Token};
 use http::message::{Request, Response};
-use http::namespace::{self, subcode};
-use http::sas::{self, Signer, Token};
 use http::server;
 
 /// What the client did, as [`Session::serve_one`] reports it.

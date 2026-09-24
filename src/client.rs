@@ -15,10 +15,10 @@ use serde_json::Value;
 use transport::error::{Result, protocol_error};
 
 use crate::properties::{self, property};
+use azure::namespace;
+use azure::sas::{self, Signer};
 use http::endpoint;
 use http::message::{self, Request, Response};
-use http::namespace;
-use http::sas::{self, Signer};
 
 /// The most seconds one peek-lock waits for a message: what the service
 /// allows a `timeout` to be.

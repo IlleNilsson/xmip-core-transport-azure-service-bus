@@ -18,12 +18,13 @@
 //! session.rs     the far end a test or the playground runs on loopback
 //! ```
 //!
-//! The endpoint, the percent-encoding, HTTP itself, the Shared Access
-//! Signature and the namespace's error and judgement come from the http
-//! technology, the flat XML scan from the capability (ADR-0044). The
-//! signature and the error lived here until 2026-09-14, imported sideways
-//! by azure-event-hubs; what two technologies both speak over HTTP is the
-//! carrier's to share.
+//! The endpoint, the percent-encoding and HTTP itself come from the http
+//! technology; the Shared Access Signature and the namespace's error and
+//! judgement from the Azure crate, the flat XML scan from the capability
+//! (ADR-0044). The signature and the error lived here until 2026-09-14,
+//! imported sideways by azure-event-hubs, and in the http technology until
+//! the owner's ruling of 2026-09-22: what Azure speaks is the Azure crate's
+//! to share.
 //!
 //! A message is bytes — the body as it is, 256 KiB at most on the
 //! Standard tier every namespace starts at: [`ceiling`]. Nothing is

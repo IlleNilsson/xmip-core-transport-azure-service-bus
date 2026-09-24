@@ -18,7 +18,7 @@
 //! session.rs     the far end a test or the playground runs on loopback
 //! ```
 //!
-//! The endpoint, the percent-encoding and HTTP itself come from the http
+//! The endpoint and HTTP itself come from the http
 //! technology; the Shared Access Signature and the namespace's error and
 //! judgement from the Azure crate, the flat XML scan from the capability
 //! (ADR-0044). The signature and the error lived here until 2026-09-14,
@@ -49,7 +49,9 @@ use std::time::Duration;
 pub use client::{Client, Locked, MAX_WAIT};
 use http::endpoint;
 pub use session::{Event, Session};
-use transport::error::{Result, TransportError, protocol_error};
+use transport::ceiling;
+use transport::error::{Result, protocol_error};
+use transport::listening::Listening;
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
 use transport::socket;
 use transport::{Arrived, Directions, Transport};
@@ -184,13 +186,7 @@ impl Transport for ServiceBusTransport {
     }
 
     fn send(&self, target: &str, bytes: &[u8]) -> Result<()> {
-        if bytes.len() > ceiling() {
-            return Err(TransportError::permanent(format!(
-                "{} bytes is over the {} one Service Bus message carries",
-                bytes.len(),
-                ceiling()
-            )));
-        }
+        ceiling::within(bytes.len(), ceiling(), "one Service Bus message carries")?;
         self.client()?.send(self.resolve(target), bytes)
     }
 }
@@ -207,39 +203,21 @@ impl ServiceBusTransport {
     }
 }
 
-/// A bound session waiting for its one send.
-struct Serving {
-    session: Session,
-    listener: TcpListener,
-    address: String,
-}
-
-impl FarEnd for Serving {
-    fn address(&self) -> &str {
-        &self.address
-    }
-
-    fn take_one(mut self: Box<Self>) -> Result<Arrived> {
-        match self.session.serve_one(&self.listener)? {
-            Event::Sent(arrived) => Ok(arrived),
-            Event::Refused(code) => Err(protocol_error(format!("the session refused: {code}"))),
-            other => Err(protocol_error(format!("not a send: {other:?}"))),
-        }
-    }
-}
-
 impl Loopback for ServiceBusTransport {
     fn ceiling(&self) -> Option<usize> {
         Some(ceiling())
     }
 
     fn far_end(&self) -> Result<Box<dyn FarEnd>> {
-        let (listener, address) = socket::bind_tcp(&endpoint::authority(&self.endpoint)?)?;
-        Ok(Box::new(Serving {
-            session: self.session(),
-            listener,
-            address,
-        }))
+        let mut session = self.session();
+        Ok(Box::new(Listening::new(
+            move |listener: &TcpListener| match session.serve_one(listener)? {
+                Event::Sent(arrived) => Ok(arrived),
+                Event::Refused(code) => Err(protocol_error(format!("the session refused: {code}"))),
+                other => Err(protocol_error(format!("not a send: {other:?}"))),
+            },
+            socket::bind_tcp(&endpoint::authority(&self.endpoint)?)?,
+        )))
     }
 
     /// Send the payload as one message, from a fresh near end signing as

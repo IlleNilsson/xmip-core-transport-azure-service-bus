@@ -24,8 +24,8 @@ use crate::client::chosen_id;
 use crate::properties::{self, BROKER_PROPERTIES};
 use azure::namespace::{self, subcode};
 use azure::sas::{self, Signer, Token};
-use http::message::{Request, Response};
 use http::server;
+use net::http::{Request, Response};
 
 /// What the client did, as [`Session::serve_one`] reports it.
 #[derive(Clone, Debug, PartialEq, Eq)]

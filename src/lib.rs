@@ -47,7 +47,7 @@ use std::net::TcpListener;
 use std::time::Duration;
 
 pub use client::{Client, Locked, MAX_WAIT};
-use http::endpoint;
+use net::Endpoint;
 pub use session::{Event, Session};
 use transport::ceiling;
 use transport::error::{Result, protocol_error};
@@ -216,7 +216,7 @@ impl Loopback for ServiceBusTransport {
                 Event::Refused(code) => Err(protocol_error(format!("the session refused: {code}"))),
                 other => Err(protocol_error(format!("not a send: {other:?}"))),
             },
-            socket::bind_tcp(&endpoint::authority(&self.endpoint)?)?,
+            socket::bind_tcp(&Endpoint::parse(&self.endpoint)?.address())?,
         )))
     }
 

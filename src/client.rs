@@ -18,7 +18,8 @@ use crate::properties::{self, property};
 use azure::namespace;
 use azure::sas::{self, Signer};
 use http::endpoint;
-use http::message::{self, Request, Response};
+use net::Endpoint;
+use net::http::{Request, Response};
 
 /// The most seconds one peek-lock waits for a message: what the service
 /// allows a `timeout` to be.
@@ -34,8 +35,8 @@ pub struct Locked {
 }
 
 pub struct Client {
-    endpoint: String,
-    host: String,
+    namespace: String,
+    endpoint: Endpoint,
     signer: Signer,
     timeout: Option<Duration>,
 }
@@ -48,8 +49,8 @@ impl Client {
     /// Where `endpoint` is not an HTTP URL.
     pub fn new(endpoint: &str, policy: &str, key: &str) -> Result<Self> {
         Ok(Self {
-            endpoint: endpoint.trim_end_matches('/').to_string(),
-            host: endpoint::authority(endpoint)?,
+            namespace: endpoint.trim_end_matches('/').to_string(),
+            endpoint: Endpoint::parse(endpoint)?,
             signer: Signer::new(policy, key),
             timeout: None,
         })
@@ -65,7 +66,7 @@ impl Client {
     /// The resource a token for `queue` names: the queue's own URL.
     #[must_use]
     pub fn resource(&self, queue: &str) -> String {
-        format!("{}/{queue}", self.endpoint)
+        format!("{}/{queue}", self.namespace)
     }
 
     /// Send `bytes` as one message to `queue`.
@@ -119,11 +120,11 @@ impl Client {
     }
 
     fn call(&self, queue: &str, request: Request) -> Result<Response> {
-        let request = request.header("Host", &self.host);
+        let request = request.header("Host", &self.endpoint.authority());
         let expiry = sas::now() + sas::LIFETIME;
         let signed = self.signer.sign(request, &self.resource(queue), expiry);
         let stream = endpoint::connect(&self.endpoint, self.timeout)?;
-        namespace::judge("Service Bus", message::exchange(stream, &signed)?)
+        namespace::judge("Service Bus", net::http::exchange(stream, &signed)?)
     }
 }
 

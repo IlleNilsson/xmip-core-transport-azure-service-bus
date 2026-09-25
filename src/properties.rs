@@ -11,7 +11,7 @@
 use serde_json::Value;
 use transport::error::{Result, protocol_error};
 
-use http::message::{Request, Response};
+use net::http::{Request, Response};
 
 /// The one header a message's properties travel in.
 pub const BROKER_PROPERTIES: &str = "BrokerProperties";

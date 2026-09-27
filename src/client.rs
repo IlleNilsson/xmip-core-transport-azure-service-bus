@@ -17,7 +17,7 @@ use transport::error::{Result, protocol_error};
 use crate::properties::{self, property};
 use azure::namespace;
 use azure::sas::{self, Signer};
-use http::endpoint;
+use http::endpoint::{Connections, Offer};
 use net::Endpoint;
 use net::http::{Request, Response};
 
@@ -39,6 +39,9 @@ pub struct Client {
     endpoint: Endpoint,
     signer: Signer,
     timeout: Option<Duration>,
+    /// The connections kept to the service, shared with the transport
+    /// that made this client.
+    connections: Connections,
 }
 
 impl Client {
@@ -53,6 +56,7 @@ impl Client {
             endpoint: Endpoint::parse(endpoint)?,
             signer: Signer::new(policy, key),
             timeout: None,
+            connections: Connections::new(),
         })
     }
 
@@ -60,6 +64,14 @@ impl Client {
     #[must_use]
     pub const fn timing_out_after(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
+        self
+    }
+
+    /// Keep connections among `connections`, which the transport holds
+    /// across every client it makes.
+    #[must_use]
+    pub fn sharing(mut self, connections: Connections) -> Self {
+        self.connections = connections;
         self
     }
 
@@ -123,8 +135,10 @@ impl Client {
         let request = request.header("Host", &self.endpoint.authority());
         let expiry = sas::now() + sas::LIFETIME;
         let signed = self.signer.sign(request, &self.resource(queue), expiry);
-        let stream = endpoint::connect(&self.endpoint, self.timeout)?;
-        namespace::judge("Service Bus", net::http::exchange(stream, &signed)?)
+        let answer =
+            self.connections
+                .exchange(&self.endpoint, self.timeout, Offer::Http11, &signed)?;
+        namespace::judge("Service Bus", answer)
     }
 }
 

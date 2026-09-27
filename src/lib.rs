@@ -47,6 +47,7 @@ use std::net::TcpListener;
 use std::time::Duration;
 
 pub use client::{Client, Locked, MAX_WAIT};
+use http::endpoint::Connections;
 use net::Endpoint;
 pub use session::{Event, Session};
 use transport::ceiling;
@@ -79,6 +80,9 @@ pub struct ServiceBusTransport {
     key: String,
     wait: u8,
     timeout: Option<Duration>,
+    /// The connections kept to the service, shared by every client this
+    /// makes.
+    connections: Connections,
 }
 
 impl ServiceBusTransport {
@@ -94,6 +98,7 @@ impl ServiceBusTransport {
             key: String::new(),
             wait: 0,
             timeout: None,
+            connections: Connections::new(),
         }
     }
 
@@ -130,6 +135,7 @@ impl ServiceBusTransport {
     /// Where the endpoint is not an HTTP URL.
     pub fn client(&self) -> Result<Client> {
         let client = Client::new(&self.endpoint, &self.policy, &self.key)?;
+        let client = client.sharing(self.connections.clone());
         Ok(match self.timeout {
             Some(timeout) => client.timing_out_after(timeout),
             None => client,

@@ -54,7 +54,8 @@ use transport::error::{Result, protocol_error};
 use transport::listening::Listening;
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
 use transport::socket;
-use transport::{Arrived, Directions, Transport};
+use transport::{Arrived, Configured, Directions, Transport};
+use xcore::settings::{Applies, Kind, Presence, Read, Setting, Settings};
 
 /// The largest message a Standard namespace carries: 256 KiB.
 #[must_use]
@@ -191,6 +192,56 @@ impl Transport for ServiceBusTransport {
     }
 }
 
+impl Configured for ServiceBusTransport {
+    /// The address is the namespace, `https://<ns>.servicebus.windows.net`.
+    /// The shared access policy and its key are the Location's credentials,
+    /// not settings: a secret never is.
+    const SETTINGS: &'static Settings = &Settings {
+        technology: env!("CARGO_PKG_NAME"),
+        settings: &[
+            Setting {
+                name: "queue",
+                kind: Kind::Text,
+                presence: Presence::Required,
+                meaning: "The queue received from, and sent to when a send target names none.",
+                applies: Applies::Both,
+            },
+            Setting {
+                name: "wait_seconds",
+                kind: Kind::Integer {
+                    minimum: 0,
+                    maximum: MAX_WAIT as i64,
+                },
+                presence: Presence::Optional,
+                meaning: "How many seconds a receive long-polls an empty queue for a \
+                          message; it answers at once when left out.",
+                applies: Applies::Receive,
+            },
+            Setting {
+                name: "timeout",
+                kind: Kind::Duration,
+                presence: Presence::Optional,
+                meaning: "How long an endpoint that stops answering is waited on; unbounded \
+                          when left out.",
+                applies: Applies::Both,
+            },
+        ],
+    };
+
+    fn configured(address: &str, settings: &Read) -> Result<Self> {
+        // The policy and its key come through the Location's credentials.
+        let mut transport = Self::new(address, settings.text("queue"));
+        if let Some(seconds) = settings.optional_integer("wait_seconds") {
+            // The declaration holds it to MAX_WAIT; waiting caps it again.
+            transport = transport.waiting(u8::try_from(seconds).unwrap_or(MAX_WAIT));
+        }
+        Ok(match settings.optional_duration("timeout") {
+            Some(timeout) => transport.timing_out_after(timeout),
+            None => transport,
+        })
+    }
+}
+
 impl ServiceBusTransport {
     /// Both ends on this machine: an ephemeral local port, one policy and
     /// key the far end expects and the near end signs with, the loopback
@@ -241,6 +292,35 @@ mod tests {
             .with_policy("policy", key)
             .waiting(1)
             .timing_out_after(Duration::from_secs(2))
+    }
+
+    #[test]
+    fn service_bus_declares_its_settings_and_reads_through_them() {
+        use xcore::settings::Given;
+        assert_eq!(
+            ServiceBusTransport::SETTINGS.problems(),
+            Vec::<String>::new()
+        );
+        let namespace = "https://trade.servicebus.windows.net";
+        let given = [
+            ("queue".to_string(), Given::Text("orders".to_string())),
+            ("wait_seconds".to_string(), Given::Integer(60)),
+            ("timeout".to_string(), Given::Text("90s".to_string())),
+        ];
+        let received =
+            ServiceBusTransport::open(namespace, Applies::Receive, &given).expect("built");
+        assert_eq!(
+            (received.endpoint.as_str(), received.queue.as_str()),
+            (namespace, "orders")
+        );
+        assert_eq!(received.wait, 60);
+        assert_eq!(received.timeout, Some(Duration::from_secs(90)));
+        assert!(received.key.is_empty(), "the key is the credentials'");
+        let Err(refused) = ServiceBusTransport::open(namespace, Applies::Send, &given[1..]) else {
+            panic!("the queue is required, and a Send Location does not long-poll");
+        };
+        assert!(refused.message.contains("\"queue\""), "{refused}");
+        assert!(refused.message.contains("\"wait_seconds\""), "{refused}");
     }
 
     fn serve(

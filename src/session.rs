@@ -216,16 +216,10 @@ impl Session {
     }
 }
 
-/// The queue `queue` as an origin names it: the token's scheme and
-/// authority, then the queue's path.
+/// The queue `queue` as an origin names it: the token's namespace, then
+/// the queue's path.
 fn origin(token: &Token, queue: &str) -> String {
-    let base = token
-        .resource
-        .split_once("://")
-        .map_or(token.resource.as_str(), |(scheme, rest)| {
-            &token.resource[..scheme.len() + 3 + rest.find('/').unwrap_or(rest.len())]
-        });
-    format!("{base}/{queue}")
+    format!("{}/{queue}", token.namespace())
 }
 
 fn locked(queue: &str, id: Option<String>, wait: u8) -> Event {

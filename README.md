@@ -6,6 +6,8 @@ The Shared Access Signature and the judgement of a namespace's answers come from
 
 Requests go on connections kept between them (`http::endpoint::Connections`, offering HTTP/1.1): the transport holds them and hands them to every client it makes, so a call costs one exchange and not a connect, a TLS handshake and a `Connection: close`, as it did until 2026-09-27.
 
+The namespace an origin names is `azure::sas::Token::namespace`; until 2026-09-28 this technology and Event Hubs each cut a token's resource by hand.
+
 ## Toolchain
 
 `rust-toolchain.toml` pins the toolchain for the whole estate. Do not change it

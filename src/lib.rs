@@ -4,17 +4,19 @@
 //! one Stream, its id kept beside it.
 //!
 //! Service Bus is the queue of every organisation that lives in Azure, and
-//! its REST API is three calls on a queue under the namespace: send a
-//! message, peek-lock the next one with long polling, complete it by its
-//! lock token. A Receive Location peek-locks, hands each body on as a
-//! Stream and completes it once it is; a Send Location sends a Stream as
-//! one message. Both carry a Shared Access Signature over plain HTTP/1.1
-//! on a socket — `https://` with the `tls` feature, which is the http
-//! technology's TLS (ADR-0033).
+//! its REST API is four calls on a queue under the namespace: send a
+//! message, peek-lock the next one with long polling, complete it or unlock
+//! it by its lock token. A Receive Location peek-locks and hands each body
+//! on as a Stream, still locked; it completes the message once the runtime
+//! accepts it after the whole receive cycle, completes it too where the
+//! cycle refused it — the REST API has no dead-letter call — and unlocks it
+//! where the cycle failed. A Send Location sends a Stream as one message. Both carry a
+//! Shared Access Signature over plain HTTP/1.1 on a socket — `https://`
+//! with the `tls` feature, which is the http technology's TLS (ADR-0033).
 //!
 //! ```text
 //! properties.rs  the BrokerProperties header, both ways
-//! client.rs      Xmip's side: send, peek-lock, complete
+//! client.rs      Xmip's side: send, peek-lock, complete, unlock
 //! session.rs     the far end a test or the playground runs on loopback
 //! ```
 //!
@@ -44,6 +46,7 @@ pub mod properties;
 pub mod session;
 
 use std::net::TcpListener;
+use std::sync::Arc;
 use std::time::Duration;
 
 pub use client::{Client, Locked, MAX_WAIT};
@@ -55,7 +58,7 @@ use transport::error::{Result, protocol_error};
 use transport::listening::Listening;
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
 use transport::socket;
-use transport::{Arrived, Configured, Directions, Transport};
+use transport::{Acknowledgement, Arrived, Configured, Directions, Transport, Verdict};
 use xcore::settings::{Applies, Kind, Presence, Read, Setting, Settings};
 
 /// The largest message a Standard namespace carries: 256 KiB.
@@ -173,21 +176,37 @@ impl Transport for ServiceBusTransport {
         Directions::BOTH
     }
 
-    /// Up to [`MAX_MESSAGES`] messages, peek-locked one at a time and each
-    /// completed once it is a Stream.
+    fn arrivals(&self) -> transport::Arrivals {
+        transport::Arrivals::Unordered(
+            "a message received stays peek-locked from the next receive until it is told",
+        )
+    }
+
+    /// Up to [`MAX_MESSAGES`] messages, peek-locked one at a time, each
+    /// whole and left locked: the receive completes nothing, and never
+    /// receives and deletes. Its acknowledgement completes the message on
+    /// [`Verdict::Accepted`], and on [`Verdict::Refused`] too: dead-lettering
+    /// is a settlement of the AMQP protocol and the SDKs, and the REST API
+    /// these four calls are has none, so a refused message is completed and
+    /// not received again — the runtime audited the refusal and keeps the
+    /// Stream. On [`Verdict::Failed`] it unlocks the message, so the next
+    /// peek-lock is handed it again.
     fn receive(&self) -> Result<Vec<Arrived>> {
-        let client = self.client()?;
+        let client = Arc::new(self.client()?);
         let queue_url = client.resource(&self.queue);
         let mut arrived = Vec::new();
         while arrived.len() < MAX_MESSAGES {
             let Some(locked) = client.peek_lock(&self.queue, self.wait)? else {
                 break;
             };
-            client.complete(&self.queue, &locked.id, &locked.lock_token)?;
-            arrived.push(Arrived::new(
-                format!("{queue_url}#{}", locked.id),
-                locked.body,
-            ));
+            let origin = format!("{queue_url}#{}", locked.id);
+            let (client, queue) = (Arc::clone(&client), self.queue.clone());
+            let (id, lock) = (locked.id, locked.lock_token);
+            let acknowledgement = Acknowledgement::deferred(move |verdict| match verdict {
+                Verdict::Accepted | Verdict::Refused(_) => client.complete(&queue, &id, &lock),
+                Verdict::Failed => client.abandon(&queue, &id, &lock),
+            });
+            arrived.push(Arrived::whole(origin, locked.body, acknowledgement));
         }
         Ok(arrived)
     }
@@ -292,6 +311,7 @@ impl Loopback for ServiceBusTransport {
 mod tests {
     use super::*;
     use std::thread::JoinHandle;
+    use transport::Taken;
 
     fn node(endpoint: &str, key: &str) -> ServiceBusTransport {
         ServiceBusTransport::new(endpoint, "orders")
@@ -343,40 +363,58 @@ mod tests {
     }
 
     #[test]
-    fn what_is_sent_to_a_session_is_received_back_and_completed() {
+    fn an_accepted_or_refused_message_is_completed_and_a_failed_one_is_received_again() {
         let (listener, address) = socket::bind_tcp("127.0.0.1:0").expect("bind");
         let near = node(&format!("http://{address}"), "secret");
-        // Two sends; then a peek-lock and a complete per message, and the
-        // peek-lock that finds the queue empty.
-        let far_end = serve(near.session(), listener, 7);
+        // Three sends; three peek-locks and the one that finds nothing left
+        // unlocked; a complete, an unlock and a complete; a peek-lock, the
+        // empty one, a complete.
+        let far_end = serve(near.session(), listener, 13);
         near.send("", b"UNA:+.? '").expect("its own queue");
         near.send("orders", &[0, 0xff, b'\r', b'\n'])
             .expect("a queue name");
-        let arrived = near.receive().expect("received");
-        assert_eq!(arrived.len(), 2);
-        assert_eq!(arrived[0].bytes, b"UNA:+.? '");
-        assert_eq!(arrived[1].bytes, [0, 0xff, b'\r', b'\n']);
+        near.send("", b"C3").expect("its own queue");
+        let mut arrived = near.receive().expect("received");
+        assert_eq!(arrived.len(), 3);
+        assert!(arrived.iter().all(Arrived::defers));
+        let third = arrived.pop().expect("third");
+        let third_origin = third.origin_uri.clone();
+        let second = arrived.pop().expect("second");
+        let first = arrived.pop().expect("first").taken().expect("completed");
+        assert_eq!(first.bytes, b"UNA:+.? '");
         let queue_url = format!("http://{address}/orders");
-        assert!(arrived[0].origin_uri.starts_with(&format!("{queue_url}#")));
+        assert!(first.origin_uri.starts_with(&format!("{queue_url}#")));
+        let failed_origin = second.origin_uri.clone();
+        second.failed().expect("unlocked");
+        third
+            .refused(transport::Refusal::Unacceptable)
+            .expect("completed");
+        let again = near.receive().expect("received again");
+        assert_eq!(again.len(), 1, "the failed one, and only it");
+        let again = again.into_iter().next().expect("one").taken().expect("ok");
+        assert_eq!(
+            (again.origin_uri, again.bytes),
+            (failed_origin.clone(), vec![0, 0xff, b'\r', b'\n'])
+        );
         let (session, events) = far_end.join().expect("thread");
-        assert!(session.messages().is_empty(), "completed after receive");
+        assert!(session.messages().is_empty(), "all completed once answered");
         assert_eq!(
             events[0],
-            Event::Sent(Arrived::new(
-                arrived[0].origin_uri.clone(),
-                b"UNA:+.? '".to_vec()
-            ))
+            Event::Sent(Taken::new(first.origin_uri.clone(), b"UNA:+.? '".to_vec()))
         );
         assert!(matches!(
-            &events[2],
+            &events[3],
             Event::Locked {
                 id: Some(_),
                 wait: 1,
                 ..
             }
         ));
-        assert_eq!(events[3], Event::Completed(arrived[0].origin_uri.clone()));
         assert!(matches!(&events[6], Event::Locked { id: None, .. }));
+        assert_eq!(events[7], Event::Completed(first.origin_uri));
+        assert_eq!(events[8], Event::Abandoned(failed_origin.clone()));
+        assert_eq!(events[9], Event::Completed(third_origin));
+        assert_eq!(events[12], Event::Completed(failed_origin));
     }
 
     #[test]

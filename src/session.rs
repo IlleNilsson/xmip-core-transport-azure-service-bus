@@ -3,20 +3,21 @@
 //!
 //! Not Service Bus. One session holds the messages of every queue it is
 //! asked about in memory, verifies every request's token against one
-//! policy, and answers the three calls with the shapes the service answers
+//! policy, and answers the four calls with the shapes the service answers
 //! them — 201 for a send, the locked message with its `BrokerProperties`
-//! for a peek-lock and 204 where the queue is empty, 200 for a complete,
-//! the XML error with its subcode. A peek-lock that finds nothing answers
-//! at once and records the wait it was asked for rather than holding the
-//! connection; a locked message stays on the queue until it is completed,
-//! as the service keeps it.
+//! for a peek-lock and 204 where the queue is empty, 200 for a complete and
+//! for an unlock, the XML error with its subcode. A peek-lock that finds
+//! nothing answers at once and records the wait it was asked for rather
+//! than holding the connection; a locked message stays on the queue until
+//! it is completed, as the service keeps it, and is offered again once it
+//! is unlocked.
 
 use std::collections::BTreeMap;
 use std::net::TcpListener;
 use std::time::Duration;
 
 use serde_json::json;
-use transport::Arrived;
+use transport::Taken;
 use transport::error::Result;
 
 use crate::ceiling;
@@ -32,7 +33,7 @@ use net::http::{Request, Response};
 pub enum Event {
     /// The client sent a message; here is the Stream, its origin the queue
     /// URL and the id it was given.
-    Sent(Arrived),
+    Sent(Taken),
     /// The client peek-locked the head of `queue`, asking to wait `wait`
     /// seconds where there was none; `id` is the message it was handed.
     Locked {
@@ -42,6 +43,8 @@ pub enum Event {
     },
     /// The client completed this message.
     Completed(String),
+    /// The client unlocked this message, leaving it on the queue.
+    Abandoned(String),
     /// The client was answered with this error subcode.
     Refused(String),
 }
@@ -117,7 +120,8 @@ impl Session {
             ("POST", "/head") => self.peek_lock(queue, &origin, request),
             ("DELETE", "/head") => self.receive_and_delete(queue, &origin),
             ("DELETE", locked) => self.complete(queue, &origin, locked),
-            _ => refused(405, "40500: Not one of the three calls"),
+            ("PUT", locked) if locked != "/head" => self.unlock(queue, &origin, locked),
+            _ => refused(405, "40500: Not one of the four calls"),
         }
     }
 
@@ -143,7 +147,7 @@ impl Session {
         };
         self.queues.entry(queue.to_string()).or_default().push(held);
         (
-            Event::Sent(Arrived::new(format!("{origin}#{id}"), request.body.clone())),
+            Event::Sent(Taken::new(format!("{origin}#{id}"), request.body.clone())),
             Response::new(201),
         )
     }
@@ -196,24 +200,36 @@ impl Session {
 
     fn complete(&mut self, queue: &str, origin: &str, locked: &str) -> (Event, Response) {
         let held = self.queues.entry(queue.to_string()).or_default();
-        let at = locked
-            .strip_prefix('/')
-            .and_then(|rest| rest.split_once('/'))
-            .and_then(|(id, lock)| {
-                held.iter()
-                    .position(|m| m.id == id && m.lock.as_deref() == Some(lock))
-            });
-        match at {
-            Some(at) => {
-                let message = held.remove(at);
-                (
-                    Event::Completed(format!("{origin}#{}", message.id)),
-                    Response::new(200),
-                )
-            }
-            None => refused(404, "40400: No such message under that lock"),
-        }
+        let Some(at) = under_lock(held, locked) else {
+            return refused(404, "40400: No such message under that lock");
+        };
+        let message = held.remove(at);
+        (
+            Event::Completed(format!("{origin}#{}", message.id)),
+            Response::new(200),
+        )
     }
+
+    /// Unlock: the message stays on the queue, offered to the next
+    /// peek-lock, as the service abandons it.
+    fn unlock(&mut self, queue: &str, origin: &str, locked: &str) -> (Event, Response) {
+        let held = self.queues.entry(queue.to_string()).or_default();
+        let Some(at) = under_lock(held, locked) else {
+            return refused(404, "40400: No such message under that lock");
+        };
+        held[at].lock = None;
+        (
+            Event::Abandoned(format!("{origin}#{}", held[at].id)),
+            Response::new(200),
+        )
+    }
+}
+
+/// Where the message `/<id>/<lock>` names is held, locked under that lock.
+fn under_lock(held: &[Held], locked: &str) -> Option<usize> {
+    let (id, lock) = locked.strip_prefix('/')?.split_once('/')?;
+    held.iter()
+        .position(|m| m.id == id && m.lock.as_deref() == Some(lock))
 }
 
 /// The queue `queue` as an origin names it: the token's namespace, then
@@ -259,7 +275,7 @@ mod tests {
         assert_eq!(response.status, 201);
         assert_eq!(
             event,
-            Event::Sent(Arrived::new(
+            Event::Sent(Taken::new(
                 "http://ns.local/orders#00000001-xmip",
                 b"a<b".to_vec()
             ))
@@ -270,7 +286,7 @@ mod tests {
         let (event, _) = session.answer(&chosen);
         assert_eq!(
             event,
-            Event::Sent(Arrived::new("http://ns.local/orders#mine", Vec::new()))
+            Event::Sent(Taken::new("http://ns.local/orders#mine", Vec::new()))
         );
         let peek = signed("POST", "/orders/messages/head").query("timeout", "5");
         let (event, response) = session.answer(&peek);

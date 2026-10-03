@@ -1,13 +1,13 @@
-//! Xmip's side: the three calls a Location makes, each one request with a
+//! Xmip's side: the four calls a Location makes, each one request with a
 //! Shared Access Signature over one connection to the namespace.
 //!
 //! A queue is a path under the namespace — `https://ns.servicebus.windows.
 //! net/orders` in the cloud, `http://127.0.0.1:port/orders` for a stand-in
-//! — and its messages are three calls: `POST …/messages` sends one, `POST
+//! — and its messages are four calls: `POST …/messages` sends one, `POST
 //! …/messages/head` peeks the next and locks it, `DELETE …/messages/<id>/
-//! <lock>` completes it. A peek-lock waits up to `timeout` seconds for a
-//! message where there is none, then answers 204: long polling, as the
-//! service calls it.
+//! <lock>` completes it, `PUT …/messages/<id>/<lock>` unlocks it. A
+//! peek-lock waits up to `timeout` seconds for a message where there is
+//! none, then answers 204: long polling, as the service calls it.
 
 use std::time::Duration;
 
@@ -128,6 +128,18 @@ impl Client {
     /// reached.
     pub fn complete(&self, queue: &str, id: &str, lock_token: &str) -> Result<()> {
         let request = Request::new("DELETE", format!("/{queue}/messages/{id}/{lock_token}"));
+        self.call(queue, request).map(|_| ())
+    }
+
+    /// Unlock the message `id` on `queue`, held under `lock_token`: it
+    /// stays on the queue and the next peek-lock is handed it again, as
+    /// the service abandons a message.
+    ///
+    /// # Errors
+    /// Where the lock has lapsed, or the namespace refused or could not be
+    /// reached.
+    pub fn abandon(&self, queue: &str, id: &str, lock_token: &str) -> Result<()> {
+        let request = Request::new("PUT", format!("/{queue}/messages/{id}/{lock_token}"));
         self.call(queue, request).map(|_| ())
     }
 

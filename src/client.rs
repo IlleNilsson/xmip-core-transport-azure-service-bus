@@ -81,15 +81,20 @@ impl Client {
         format!("{}/{queue}", self.namespace)
     }
 
-    /// Send `bytes` as one message to `queue`.
+    /// Send `bytes` as one message to `queue`, under `key` as its
+    /// `MessageId` where there is one: a queue with duplicate detection on
+    /// drops a message whose id it has seen within its window.
     ///
     /// # Errors
     /// Where the namespace refused or could not be reached.
-    pub fn send(&self, queue: &str, bytes: &[u8]) -> Result<()> {
-        let request = Request::new("POST", format!("/{queue}/messages"))
-            .header("Content-Type", "application/octet-stream")
-            .body(bytes);
-        self.call(queue, request).map(|_| ())
+    pub fn send(&self, queue: &str, bytes: &[u8], key: Option<&str>) -> Result<()> {
+        let mut request = Request::new("POST", format!("/{queue}/messages"))
+            .header("Content-Type", "application/octet-stream");
+        if let Some(key) = key {
+            let properties = serde_json::json!({ "MessageId": key });
+            request = request.header(properties::BROKER_PROPERTIES, &properties.to_string());
+        }
+        self.call(queue, request.body(bytes)).map(|_| ())
     }
 
     /// The next message on `queue`, locked to this receiver until it is
@@ -181,8 +186,10 @@ mod tests {
         let client = Client::new(&format!("http://{address}/"), "policy", "secret")
             .expect("endpoint")
             .timing_out_after(Duration::from_secs(2));
-        client.send("orders", b"UNA:+.? '").expect("sent");
-        client.send("orders", &[0, 0xff, b'\n']).expect("sent");
+        client.send("orders", b"UNA:+.? '", None).expect("sent");
+        client
+            .send("orders", &[0, 0xff, b'\n'], None)
+            .expect("sent");
         let first = client
             .peek_lock("orders", 5)
             .expect("locked")
@@ -240,7 +247,7 @@ mod tests {
             Event::Refused("40400".to_string())
         );
         let nobody = Client::new("http://127.0.0.1:1", "p", "k").expect("ok");
-        assert!(nobody.send("q", b"x").expect_err("nobody").retryable);
+        assert!(nobody.send("q", b"x", None).expect_err("nobody").retryable);
         assert!(Client::new("ns.local", "p", "k").is_err());
         assert_eq!(
             client.resource("orders"),

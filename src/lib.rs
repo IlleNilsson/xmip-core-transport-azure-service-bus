@@ -212,8 +212,22 @@ impl Transport for ServiceBusTransport {
     }
 
     fn send(&self, target: &str, bytes: &[u8]) -> Result<()> {
+        self.send_under(target, bytes, None)
+    }
+
+    /// The key is the message's `MessageId`, in its `BrokerProperties`: a
+    /// queue with duplicate detection on drops a message whose id it has
+    /// seen within its detection window.
+    fn send_keyed(&self, target: &str, bytes: &[u8], key: &str) -> Result<()> {
+        self.send_under(target, bytes, Some(key))
+    }
+}
+
+impl ServiceBusTransport {
+    /// The one send: one message to the queue the target names.
+    fn send_under(&self, target: &str, bytes: &[u8], key: Option<&str>) -> Result<()> {
         ceiling::within(bytes.len(), ceiling(), "one Service Bus message carries")?;
-        self.client()?.send(self.resolve(target), bytes)
+        self.client()?.send(self.resolve(target), bytes, key)
     }
 }
 

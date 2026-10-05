@@ -12,6 +12,10 @@ The namespace an origin names is `azure::sas::Token::namespace`; until 2026-09-2
 
 A receive peek-locks each message and completes none; it never receives and deletes. Every message it hands on is whole and stays locked until the runtime gives its verdict after the whole receive cycle (runtime-model section 5). Accepted completes it (`DELETE …/messages/<id>/<lock>`); Refused completes it too: dead-lettering is a settlement of the AMQP protocol and the SDKs, and the REST API this crate speaks has no dead-letter call, so a refused message is completed and not received again; the runtime has audited the refusal, and from Message creation on the Stream is kept in Xmip (ADR-0013). Failed unlocks it (`PUT …/messages/<id>/<lock>`), so the next peek-lock is handed it again rather than after the lock lapses. A crash before the verdict leaves the message to its lock's lapse: at-least-once, never a loss. The complete is the one the receive made until 2026-10-02; the unlock is one more request on a kept connection, made only for a failed cycle.
 
+## The deduplication key
+
+A keyed send (`Transport::send_keyed`, built 2026-10-04) carries the Journey's identifier as the message's `MessageId`, in its `BrokerProperties` header, the same on every attempt of one Journey. A queue with duplicate detection on drops a message whose `MessageId` it has seen within its detection window; one without keeps both. An unkeyed `send` sends no `BrokerProperties`, and the namespace gives the message an id of its own. The in-process `Session` keeps the id a client chose, as it did.
+
 ## Toolchain
 
 `rust-toolchain.toml` pins the toolchain for the whole estate. Do not change it

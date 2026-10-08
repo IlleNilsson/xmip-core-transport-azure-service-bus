@@ -32,6 +32,9 @@ pub struct Locked {
     pub lock_token: String,
     pub sequence: u64,
     pub body: Vec<u8>,
+    /// The answer's headers: its `BrokerProperties` and the message's own
+    /// properties, which say who sent it where the sender says.
+    pub headers: Vec<(String, String)>,
 }
 
 pub struct Client {
@@ -122,6 +125,7 @@ impl Client {
             lock_token: named("LockToken")?,
             sequence: properties["SequenceNumber"].as_u64().unwrap_or(0),
             body: answer.body,
+            headers: answer.headers,
         }))
     }
 

@@ -54,11 +54,12 @@ use http::endpoint::Connections;
 use net::Endpoint;
 use net::ceiling;
 pub use session::{Event, Session};
+use transport::ArrivalIdentity;
 use transport::error::{Result, protocol_error};
 use transport::listening::Listening;
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
 use transport::socket;
-use transport::{Acknowledgement, Arrived, Configured, Directions, Transport, Verdict};
+use transport::{Acknowledgement, Arrived, Configured, Directions, Headers, Transport, Verdict};
 use xcore::settings::{Applies, Kind, Presence, Read, Setting, Settings};
 
 /// The largest message a Standard namespace carries: 256 KiB.
@@ -206,7 +207,11 @@ impl Transport for ServiceBusTransport {
                 Verdict::Accepted | Verdict::Refused(_) => client.complete(&queue, &id, &lock),
                 Verdict::Failed => client.abandon(&queue, &id, &lock),
             });
-            arrived.push(Arrived::whole(origin, locked.body, acknowledgement));
+            arrived.push(
+                Arrived::whole(origin, locked.body, acknowledgement)
+                    .detected()
+                    .with_headers(Headers::of("http").text(locked.headers)),
+            );
         }
         Ok(arrived)
     }
@@ -294,6 +299,10 @@ impl ServiceBusTransport {
 }
 
 impl Loopback for ServiceBusTransport {
+    fn arrival_identity(&self) -> ArrivalIdentity {
+        ArrivalIdentity::Unnamed("the queue delivers it: its properties say who sent it")
+    }
+
     fn ceiling(&self) -> Option<usize> {
         Some(ceiling())
     }

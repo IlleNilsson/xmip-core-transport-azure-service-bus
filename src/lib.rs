@@ -183,6 +183,14 @@ impl Transport for ServiceBusTransport {
         )
     }
 
+    fn waiting(&self) -> transport::Waiting {
+        if self.wait > 0 {
+            transport::Waiting::Waits("a long poll waits up to wait_seconds for a message")
+        } else {
+            transport::Waiting::Polled("a receive with no wait_seconds returns at once")
+        }
+    }
+
     /// Up to [`MAX_MESSAGES`] messages, peek-locked one at a time, each
     /// whole and left locked: the receive completes nothing, and never
     /// receives and deletes. Its acknowledgement completes the message on

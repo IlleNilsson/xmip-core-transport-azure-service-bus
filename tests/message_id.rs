@@ -25,8 +25,10 @@ fn a_keyed_message_carries_the_journey_id_as_its_message_id_on_every_attempt() {
             })
             .collect::<Vec<_>>()
     });
-    near.send_keyed("", b"order", KEY).expect("sent");
-    near.send_keyed("", b"order", KEY).expect("sent again");
+    near.send_from("", transport::Outgoing::held(b"order").keyed(KEY))
+        .expect("sent");
+    near.send_from("", transport::Outgoing::held(b"order").keyed(KEY))
+        .expect("sent again");
     near.send("", b"order").expect("sent unkeyed");
     let ids: Vec<String> = far_end
         .join()

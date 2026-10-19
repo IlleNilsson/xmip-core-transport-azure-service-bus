@@ -200,11 +200,11 @@ impl Transport for ServiceBusTransport {
     /// not received again — the runtime audited the refusal and keeps the
     /// Stream. On [`Verdict::Failed`] it unlocks the message, so the next
     /// peek-lock is handed it again.
-    fn receive(&self) -> Result<Vec<Arrived>> {
+    fn receive_up_to(&self, most: usize) -> Result<Vec<Arrived>> {
         let client = Arc::new(self.client()?);
         let queue_url = client.resource(&self.queue);
         let mut arrived = Vec::new();
-        while arrived.len() < MAX_MESSAGES {
+        while arrived.len() < MAX_MESSAGES.min(most) {
             let Some(locked) = client.peek_lock(&self.queue, self.wait)? else {
                 break;
             };
@@ -224,15 +224,16 @@ impl Transport for ServiceBusTransport {
         Ok(arrived)
     }
 
-    fn send(&self, target: &str, bytes: &[u8]) -> Result<()> {
-        self.send_under(target, bytes, None)
+    fn sending(&self) -> transport::Sending {
+        transport::Sending::Gathered("one Service Bus message carries the whole body")
     }
 
     /// The key is the message's `MessageId`, in its `BrokerProperties`: a
     /// queue with duplicate detection on drops a message whose id it has
     /// seen within its detection window.
-    fn send_keyed(&self, target: &str, bytes: &[u8], key: &str) -> Result<()> {
-        self.send_under(target, bytes, Some(key))
+    fn send_from(&self, target: &str, outgoing: transport::Outgoing<'_>) -> Result<()> {
+        let bytes: &[u8] = &outgoing.gather()?;
+        self.send_under(target, bytes, outgoing.key())
     }
 }
 

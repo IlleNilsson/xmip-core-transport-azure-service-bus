@@ -2,7 +2,7 @@
 
 Azure Service Bus transport: a Shared Access Signature over the REST API — send a Stream as a message, receive with peek-lock and complete each message once the runtime accepts it — a queue is a Location. A technology of [xmip-core-transport](https://github.com/IlleNilsson/xmip-core-transport).
 
-The Shared Access Signature and the judgement of a namespace's answers come from [xmip-core-transport-azure](https://github.com/IlleNilsson/xmip-core-transport-azure), where every Azure technology shares what Azure speaks over HTTP (ADR-0044, amendment 2026-09-24); HTTP itself comes from [xmip-core-transport-http](https://github.com/IlleNilsson/xmip-core-transport-http).
+The Shared Access Signature and the judgment of a namespace's answers come from [xmip-core-transport-azure](https://github.com/IlleNilsson/xmip-core-transport-azure), where every Azure technology shares what Azure speaks over HTTP (ADR-0044, amendment 2026-09-24); HTTP itself comes from [xmip-core-transport-http](https://github.com/IlleNilsson/xmip-core-transport-http).
 
 Requests go on connections kept between them (`http::endpoint::Connections`, offering HTTP/1.1): the transport holds them and hands them to every client it makes, so a call costs one exchange and not a connect, a TLS handshake and a `Connection: close`, as it did until 2026-09-27.
 

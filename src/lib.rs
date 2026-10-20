@@ -3,7 +3,7 @@
 //! Streams that arrive as messages on a Service Bus queue. One message is
 //! one Stream, its id kept beside it.
 //!
-//! Service Bus is the queue of every organisation that lives in Azure, and
+//! Service Bus is the queue of every organization that lives in Azure, and
 //! its REST API is four calls on a queue under the namespace: send a
 //! message, peek-lock the next one with long polling, complete it or unlock
 //! it by its lock token. A Receive Location peek-locks and hands each body
@@ -22,7 +22,7 @@
 //!
 //! The endpoint and HTTP itself come from the http
 //! technology; the Shared Access Signature and the namespace's error and
-//! judgement from the Azure crate, the flat XML scan from the capability
+//! judgment from the Azure crate, the flat XML scan from the capability
 //! (ADR-0044). The signature and the error lived here until 2026-09-14,
 //! imported sideways by azure-event-hubs, and in the http technology until
 //! the owner's ruling of 2026-09-22: what Azure speaks is the Azure crate's
@@ -32,7 +32,7 @@
 //! Standard tier every namespace starts at: [`ceiling`]. Nothing is
 //! refused for its content, an empty body included.
 //!
-//! A queue is not an artefact anyone claims: a locked message is the
+//! A queue is not an artifact anyone claims: a locked message is the
 //! queue's own claim until it is completed, so [`Transport::claims`]
 //! answers `None`. The origin URI is the queue URL with the message id as
 //! its fragment. A send target is a queue name under this transport's

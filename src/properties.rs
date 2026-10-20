@@ -4,7 +4,7 @@
 //! Not in its body — the body is the message, bytes as they are — but in
 //! one header, a JSON object naming the message id, the lock token a
 //! peek-lock handed out, the sequence number. Both ends read it. The error
-//! answer and the judgement that sat beside it until 2026-09-14 are the
+//! answer and the judgment that sat beside it until 2026-09-14 are the
 //! namespace's, which Event Hubs shares, and moved to the http technology
 //! (ADR-0044).
 

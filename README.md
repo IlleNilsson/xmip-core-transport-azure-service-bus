@@ -14,7 +14,7 @@ A receive peek-locks each message and completes none; it never receives and dele
 
 ## The deduplication key
 
-A keyed send (the key `Transport::send_from` is handed, `Outgoing::key`; built 2026-10-04) carries the Journey's identifier as the message's `MessageId`, in its `BrokerProperties` header, the same on every attempt of one Journey. A queue with duplicate detection on drops a message whose `MessageId` it has seen within its detection window; one without keeps both. An unkeyed `send` sends no `BrokerProperties`, and the namespace gives the message an id of its own. The in-process `Session` keeps the id a client chose, as it did.
+A keyed send (the key `Transport::send_from` is handed, `Outgoing::key`; built 2026-10-04) carries the Journey's identifier as the message's `MessageId`, in its `BrokerProperties` header, the same on every attempt on one Journey. A queue with duplicate detection on drops a message whose `MessageId` it has seen within its detection window; one without keeps both. An unkeyed `send` sends no `BrokerProperties`, and the namespace gives the message an id of its own. The in-process `Session` keeps the id a client chose, as it did.
 
 ## Toolchain
 

@@ -1,5 +1,5 @@
 //! A keyed send carries its deduplication key as the message's
-//! `MessageId`, the same on every attempt of one Journey; an unkeyed send
+//! `MessageId`, the same on every attempt on one Journey; an unkeyed send
 //! carries none, and the namespace gives it one.
 
 use std::thread;

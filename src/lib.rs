@@ -17,7 +17,7 @@
 //! ```text
 //! properties.rs  the BrokerProperties header, both ways
 //! client.rs      Xmip's side: send, peek-lock, complete, unlock
-//! session.rs     the far end a test or the playground runs on loopback
+//! session.rs     the far end a test or the essentials runs on loopback
 //! ```
 //!
 //! The endpoint and HTTP itself come from the http
@@ -147,7 +147,7 @@ impl ServiceBusTransport {
     }
 
     /// A far end that holds this transport's policy and key, for a test or
-    /// the playground to run on loopback.
+    /// the essentials to run on loopback.
     #[must_use]
     pub fn session(&self) -> Session {
         let session = Session::new(&self.policy, &self.key);
@@ -510,7 +510,7 @@ mod tests {
         assert!(loopback.refuses(&[0xff]).is_none());
     }
 
-    /// The Playground's edge payloads, written here so the crate does not
+    /// The Essentials' edge payloads, written here so the crate does not
     /// depend on it, and one at the brim.
     fn edge_payloads() -> Vec<(&'static str, Vec<u8>)> {
         vec![

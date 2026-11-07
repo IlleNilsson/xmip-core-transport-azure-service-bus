@@ -345,6 +345,7 @@ impl Loopback for ServiceBusTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::assert_matches;
     use std::thread::JoinHandle;
     use transport::Taken;
 
@@ -437,15 +438,15 @@ mod tests {
             events[0],
             Event::Sent(Taken::new(first.origin_uri.clone(), b"UNA:+.? '".to_vec()))
         );
-        assert!(matches!(
+        assert_matches!(
             &events[3],
             Event::Locked {
                 id: Some(_),
                 wait: 1,
                 ..
             }
-        ));
-        assert!(matches!(&events[6], Event::Locked { id: None, .. }));
+        );
+        assert_matches!(&events[6], Event::Locked { id: None, .. });
         assert_eq!(events[7], Event::Completed(first.origin_uri));
         assert_eq!(events[8], Event::Abandoned(failed_origin.clone()));
         assert_eq!(events[9], Event::Completed(third_origin));

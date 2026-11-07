@@ -256,6 +256,7 @@ fn refused(status: u16, detail: &str) -> (Event, Response) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::assert_matches;
 
     const RESOURCE: &str = "http://ns.local/orders";
 
@@ -305,14 +306,14 @@ mod tests {
                 .expect("a location")
                 .ends_with(&format!("/orders/messages/00000001-xmip/{lock}"))
         );
-        assert!(matches!(
+        assert_matches!(
             event,
             Event::Locked {
                 wait: 5,
                 id: Some(_),
                 ..
             }
-        ));
+        );
         let (event, response) = session.answer(&signed("DELETE", "/orders/messages/head"));
         assert_eq!(
             response.status, 200,
@@ -324,7 +325,7 @@ mod tests {
         );
         let (event, response) = session.answer(&peek);
         assert_eq!(response.status, 204, "locked, not offered again");
-        assert!(matches!(event, Event::Locked { id: None, .. }));
+        assert_matches!(event, Event::Locked { id: None, .. });
         let complete = signed("DELETE", &format!("/orders/messages/00000001-xmip/{lock}"));
         let (event, response) = session.answer(&complete);
         assert_eq!(response.status, 200);

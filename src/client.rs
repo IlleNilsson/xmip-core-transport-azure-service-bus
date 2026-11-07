@@ -174,6 +174,7 @@ pub fn chosen_id(properties: &Value) -> Option<String> {
 mod tests {
     use super::*;
     use crate::session::{Event, Session};
+    use std::assert_matches;
     use transport::socket;
 
     #[test]
@@ -211,22 +212,22 @@ mod tests {
             .expect("completed");
         let (session, events) = far_end.join().expect("thread");
         assert_eq!(session.messages().len(), 1, "one left locked");
-        assert!(matches!(
+        assert_matches!(
             &events[2],
             Event::Locked {
                 id: Some(_),
                 wait: 5,
                 ..
             }
-        ));
-        assert!(matches!(
+        );
+        assert_matches!(
             &events[4],
             Event::Locked {
                 id: None,
                 wait: 0,
                 ..
             }
-        ));
+        );
         assert_eq!(
             events[5],
             Event::Completed(format!("http://{address}/orders#{}", first.id))

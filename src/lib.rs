@@ -158,13 +158,9 @@ impl ServiceBusTransport {
     }
 
     /// The queue a target names, or this transport's own where it names
-    /// none.
+    /// none (`transport::destination::named`).
     fn resolve<'a>(&'a self, target: &'a str) -> &'a str {
-        if target.is_empty() {
-            &self.queue
-        } else {
-            target
-        }
+        transport::destination::named(target).unwrap_or(&self.queue)
     }
 }
 
@@ -284,6 +280,11 @@ impl Configured for ServiceBusTransport {
     /// The schemes a Location's address is entered with to choose this technology.
     const SCHEMES: &'static [&'static str] = &["azure-service-bus"];
 
+    /// The queue setting: the address names only the namespace.
+    fn own_target(_address: &str) -> &str {
+        transport::destination::OWN
+    }
+
     fn configured(address: &str, settings: &Read) -> Result<Self> {
         // The policy and its key come through the Location's credentials.
         let mut transport = Self::new(address, settings.text("queue"));
@@ -354,6 +355,19 @@ mod tests {
             .with_policy("policy", key)
             .waiting(1)
             .timing_out_after(Duration::from_secs(2))
+    }
+
+    #[test]
+    fn a_send_location_sends_to_its_queue_and_a_target_naming_another_wins() {
+        use xcore::settings::Given;
+        let location = "azure-service-bus://trade.servicebus.windows.net";
+        let given = [("queue".to_string(), Given::Text("orders".to_string()))];
+        let sent = ServiceBusTransport::open(location, Applies::Send, &given).expect("built");
+        assert_eq!(
+            sent.resolve(ServiceBusTransport::own_target(location)),
+            "orders"
+        );
+        assert_eq!(sent.resolve("invoices"), "invoices");
     }
 
     #[test]

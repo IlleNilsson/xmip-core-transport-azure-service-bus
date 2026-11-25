@@ -32,6 +32,11 @@ azure = { package = "xmip-core-transport-azure", git = "https://github.com/IlleN
 # BrokerProperties travels as a JSON header, and serde reads it.
 serde_json = "1"
 
+[dev-dependencies]
+# A Location's secret held in memory (`transport::secured::Kept`), from the
+# capability's test support and never a production build (ADR-0044).
+transport = { package = "xmip-core-transport", git = "https://github.com/IlleNilsson/xmip-core-transport", branch = "main", features = ["test-support"] }
+
 [features]
 default = []
 # HTTPS endpoints. Off by default, as it is in the http technology.

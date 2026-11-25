@@ -87,6 +87,11 @@ pub struct ServiceBusTransport {
     /// The connections kept to the service, shared by every client this
     /// makes.
     connections: Connections,
+    /// The secret a Location names, the key of the shared access policy
+    /// `policy` names, which a Shared Access Signature is made with, read
+    /// at each request (ADR-0019, amendment 2026-10-29; ADR-0015,
+    /// amendment 2026-11-25); `key` where it names none.
+    secret: Option<transport::Secured>,
 }
 
 impl ServiceBusTransport {
@@ -103,6 +108,7 @@ impl ServiceBusTransport {
             wait: 0,
             timeout: None,
             connections: Connections::new(),
+            secret: None,
         }
     }
 
@@ -126,12 +132,16 @@ impl ServiceBusTransport {
         self
     }
 
-    /// The client this transport speaks through.
+    /// The client this transport speaks through, signing with the policy's
+    /// key the Location's secret holds, read now, or this transport's own
+    /// where it names none.
     ///
     /// # Errors
-    /// Where the endpoint is not an HTTP URL.
+    /// Where the endpoint is not an HTTP URL, or the secret is not set or
+    /// not a password.
     pub fn client(&self) -> Result<Client> {
-        let client = Client::new(&self.endpoint, &self.policy, &self.key)?;
+        let key = transport::secured::presented(self.secret.as_ref(), &self.key, self.name())?;
+        let client = Client::new(&self.endpoint, &self.policy, &key)?;
         let client = client.sharing(self.connections.clone());
         Ok(match self.timeout {
             Some(timeout) => client.timing_out_after(timeout),
@@ -236,11 +246,13 @@ impl ServiceBusTransport {
 
 impl Configured for ServiceBusTransport {
     /// The address is the namespace, `https://<ns>.servicebus.windows.net`.
-    /// The shared access policy and its key are the Location's credentials,
-    /// not settings: a secret never is.
+    /// The shared access policy is the `key_name` setting, and its key the
+    /// Location's `secret`, a password secret the Administration Database
+    /// keeps, never a setting ([`Configured::secured_by`]).
     const SETTINGS: &'static Settings = &Settings {
         technology: env!("CARGO_PKG_NAME"),
         settings: &[
+            azure::key_name::key_name(Applies::Both),
             Setting {
                 name: "queue",
                 kind: Kind::Text,
@@ -281,13 +293,25 @@ impl Configured for ServiceBusTransport {
     }
 
     fn configured(address: &str, settings: &Read) -> Result<Self> {
-        // The policy and its key come through the Location's credentials.
+        // The policy's key is the Location's secret (`secured_by`).
         let mut transport = Self::new(address, settings.text("queue"));
         if let Some(seconds) = settings.optional_integer("wait_seconds") {
             // The declaration holds it to MAX_WAIT; waiting caps it again.
             transport = transport.waiting(u8::try_from(seconds).unwrap_or(MAX_WAIT));
         }
+        if let Some(policy) = settings.optional_text(azure::key_name::KEY_NAME) {
+            transport.policy = policy.to_string();
+        }
         Ok(transport)
+    }
+
+    /// The key of the policy `key_name` names, which the Location's secret
+    /// holds, read at each request: its sends, and its receive's
+    /// peek-locks, completes and unlocks. A Location naming a secret and no
+    /// `key_name` is refused (`azure::key_name::signing_as`).
+    fn secured_by(mut self, secret: transport::Secured) -> Result<Self> {
+        self.secret = Some(azure::key_name::signing_as(&self.policy, secret)?);
+        Ok(self)
     }
 
     /// The connections its clients share, an HTTP/2 one's frames in a span
@@ -390,7 +414,7 @@ mod tests {
         );
         assert_eq!(received.wait, 60);
         assert_eq!(received.timeout, Some(Duration::from_secs(90)));
-        assert!(received.key.is_empty(), "the key is the credentials'");
+        assert!(received.key.is_empty(), "the key is the Location's secret");
         let Err(refused) = ServiceBusTransport::open(namespace, Applies::Send, &given[1..]) else {
             panic!("the queue is required, and a Send Location does not long-poll");
         };
@@ -477,6 +501,48 @@ mod tests {
         assert!(!failure.retryable);
         let (_, events) = far_end.join().expect("thread");
         assert_eq!(events, vec![Event::Refused("40103".to_string())]);
+    }
+
+    #[test]
+    fn a_location_sends_and_receives_with_the_key_of_the_policy_it_names_from_its_secret() {
+        use transport::secured::Kept;
+        use xcore::settings::Given;
+        let drawn = Kept::drawn();
+        let (listener, address) = socket::bind_tcp("127.0.0.1:0").expect("bind");
+        // A send; a peek-lock, the empty one after it; a complete.
+        let far_end = serve(node("http://x", &drawn).session(), listener, 4);
+        let text = |name: &str, value: &str| (name.to_string(), Given::Text(value.to_string()));
+        let endpoint = format!("http://{address}");
+        let kept = std::sync::Arc::new(Kept::default());
+        let unnamed = [text("queue", "orders")];
+        let refused = ServiceBusTransport::open(&endpoint, Applies::Send, &unnamed)
+            .expect("built")
+            .secured_by(kept.secured("partner-x.bus"))
+            .err()
+            .expect("a secret with no policy is refused");
+        assert!(
+            !refused.retryable && refused.message.contains("\"key_name\""),
+            "{refused}"
+        );
+        let given = [text("queue", "orders"), text("key_name", "policy")];
+        let near = ServiceBusTransport::open(&endpoint, Applies::Receive, &given)
+            .expect("built")
+            .timing_out_after(Duration::from_secs(2))
+            .secured_by(kept.secured("partner-x.bus"))
+            .expect("Service Bus presents the policy's key");
+        let unset = near.send("", b"x").expect_err("not set yet");
+        assert!(
+            unset.retryable && unset.message.contains("is not set"),
+            "{unset}"
+        );
+        kept.set("partner-x.bus", xcore::SecretKind::Password, &drawn);
+        near.send("", b"signed").expect("signed with the secret");
+        let mut arrived = near.receive().expect("peek-locked with the secret");
+        let taken = arrived.remove(0).taken().expect("ok");
+        assert_eq!(taken.bytes, b"signed");
+        let (session, events) = far_end.join().expect("thread");
+        assert!(session.messages().is_empty(), "completed with the secret");
+        assert_eq!(events[3], Event::Completed(taken.origin_uri));
     }
 
     #[test]

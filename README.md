@@ -20,6 +20,10 @@ A receive peek-locks each message and completes none; it never receives and dele
 
 A keyed send (the key `Transport::send_from` is handed, `Outgoing::key`; built 2026-10-04) carries the Journey's identifier as the message's `MessageId`, in its `BrokerProperties` header, the same on every attempt on one Journey. A queue with duplicate detection on drops a message whose `MessageId` it has seen within its detection window; one without keeps both. An unkeyed `send` sends no `BrokerProperties`, and the namespace gives the message an id of its own. The in-process `Session` keeps the id a client chose, as it did.
 
+## The declaration
+
+What a Location of this technology is configured with is two `const`s in its `declaration` module, `src/declaration.rs`, beside the code, which `Configured` reads (ADR-0064, amendment 2026-11-26): `declaration::SETTINGS`, `key_name`, `queue`, `wait_seconds` and `timeout`, and `SCHEMES`, `azure-service-bus`; `key_name` is the Azure crate's, which this crate's declaration takes by that crate's own `declaration` feature, and `wait_seconds` is held to the crate's `MAX_WAIT`, built with the declaration. Built with its `declaration` feature alone (`--no-default-features --features declaration`), the crate is those and nothing more: its code and every crate the code is built on — the http technology, and with it TLS — are behind the default feature, and `tls`, which is code, turns the default on with it. So the library the surfaces load can carry it without the code, for the language server and the desktop to suggest and check a Service Bus Location's settings, its `key_name` among them, though no node in their process loaded the technology, once the gathering crate of open problem 48 links it. `test/Declaration.Test.ps1` in the estate holds that the declaration builds nothing the transport capability does not.
+
 ## Toolchain
 
 `rust-toolchain.toml` pins the toolchain for the whole estate. Do not change it

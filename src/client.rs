@@ -14,16 +14,13 @@ use std::time::Duration;
 use serde_json::Value;
 use transport::error::{Result, protocol_error};
 
+use crate::MAX_WAIT;
 use crate::properties::{self, property};
 use azure::namespace;
 use azure::sas::{self, Signer};
 use http::endpoint::{Connections, Offer};
 use net::Endpoint;
 use net::http::{Request, Response};
-
-/// The most seconds one peek-lock waits for a message: what the service
-/// allows a `timeout` to be.
-pub const MAX_WAIT: u8 = 230;
 
 /// One message as it came off the queue, locked to this receiver.
 #[derive(Clone, Debug, PartialEq, Eq)]

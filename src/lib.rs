@@ -40,42 +40,74 @@
 //!
 //! The transport is its own far end (ADR-0051): [`Loopback`] stands the
 //! session up at the endpoint's authority and takes the one send.
+//!
+//! **Built with its `declaration` feature alone** the crate is
+//! [`declaration`], what a Location of it is configured with, and
+//! [`MAX_WAIT`], which its `wait_seconds` is held to, and none of the code
+//! above, which is behind the default feature: what the surfaces' library
+//! carries (ADR-0064, amendment 2026-11-26).
 
+#[cfg(feature = "default")]
 pub mod client;
+#[cfg(feature = "declaration")]
+pub mod declaration;
+#[cfg(feature = "default")]
 pub mod properties;
+#[cfg(feature = "default")]
 pub mod session;
 
+#[cfg(feature = "default")]
 use std::net::TcpListener;
+#[cfg(feature = "default")]
 use std::sync::Arc;
+#[cfg(feature = "default")]
 use std::time::Duration;
 
-pub use client::{Client, Locked, MAX_WAIT};
+#[cfg(feature = "default")]
+pub use client::{Client, Locked};
+#[cfg(feature = "default")]
 use http::endpoint::Connections;
-use net::Endpoint;
-use net::ceiling;
+#[cfg(feature = "default")]
+use net::{Endpoint, ceiling};
+#[cfg(feature = "default")]
 pub use session::{Event, Session};
-use transport::ArrivalIdentity;
+#[cfg(feature = "default")]
 use transport::error::{Result, protocol_error};
-use transport::listening::Listening;
+#[cfg(feature = "default")]
 use transport::loopback::{FarEnd, LOOPBACK_TIMEOUT, Loopback};
-use transport::socket;
+#[cfg(feature = "default")]
 use transport::{Acknowledgement, Arrived, Configured, Directions, Headers, Transport, Verdict};
-use xcore::settings::{Applies, Kind, Presence, Read, Setting, Settings};
+#[cfg(feature = "default")]
+use transport::{ArrivalIdentity, listening::Listening, socket};
+#[cfg(feature = "default")]
+use xcore::settings::{Read, Settings};
 
 /// The largest message a Standard namespace carries: 256 KiB.
+#[cfg(feature = "default")]
 #[must_use]
 pub const fn ceiling() -> usize {
     256 * 1024
 }
 
+/// The most seconds one peek-lock waits for a message: what the service
+/// allows a `timeout` to be, and what the declaration's `wait_seconds` is
+/// held to, so built with it.
+#[cfg(feature = "declaration")]
+pub const MAX_WAIT: u8 = 230;
+
 /// The most messages one receive hands back.
+#[cfg(feature = "default")]
 pub const MAX_MESSAGES: usize = 10;
 
 /// What the loopback pair agrees on: one queue, one policy and its key.
+#[cfg(feature = "default")]
 const LOOPBACK_QUEUE: &str = "orders";
+#[cfg(feature = "default")]
 const LOOPBACK_POLICY: &str = "RootManageSharedAccessKey";
+#[cfg(feature = "default")]
 const LOOPBACK_KEY: &str = "probe";
 
+#[cfg(feature = "default")]
 #[derive(Clone)]
 pub struct ServiceBusTransport {
     endpoint: String,
@@ -94,6 +126,7 @@ pub struct ServiceBusTransport {
     secret: Option<transport::Secured>,
 }
 
+#[cfg(feature = "default")]
 impl ServiceBusTransport {
     /// Speak to the namespace at `endpoint` — `https://<ns>.servicebus.
     /// windows.net` in the cloud, `http://host:port` for a stand-in —
@@ -167,6 +200,7 @@ impl ServiceBusTransport {
     }
 }
 
+#[cfg(feature = "default")]
 impl Transport for ServiceBusTransport {
     fn name(&self) -> &'static str {
         "azure-service-bus"
@@ -236,6 +270,7 @@ impl Transport for ServiceBusTransport {
     }
 }
 
+#[cfg(feature = "default")]
 impl ServiceBusTransport {
     /// The one send: one message to the queue the target names.
     fn send_under(&self, target: &str, bytes: &[u8], key: Option<&str>) -> Result<()> {
@@ -244,44 +279,10 @@ impl ServiceBusTransport {
     }
 }
 
+#[cfg(feature = "default")]
 impl Configured for ServiceBusTransport {
-    /// The address is the namespace, `https://<ns>.servicebus.windows.net`.
-    /// The shared access policy is the `key_name` setting, and its key the
-    /// Location's `secret`, a password secret the Administration Database
-    /// keeps, never a setting ([`Configured::secured_by`]).
-    const SETTINGS: &'static Settings = &Settings {
-        technology: env!("CARGO_PKG_NAME"),
-        settings: &[
-            azure::key_name::key_name(Applies::Both),
-            Setting {
-                name: "queue",
-                kind: Kind::Text,
-                presence: Presence::Required,
-                meaning: "The queue received from, and sent to when a send target names none.",
-                applies: Applies::Both,
-            },
-            Setting {
-                name: "wait_seconds",
-                kind: Kind::Integer {
-                    minimum: 0,
-                    maximum: MAX_WAIT as i64,
-                },
-                presence: Presence::Optional,
-                meaning: "How many seconds a receive long-polls an empty queue for a \
-                          message; it answers at once when left out.",
-                applies: Applies::Receive,
-            },
-            transport::configured::timeout(
-                Applies::Both,
-                None,
-                "How long an endpoint that stops answering is waited on; unbounded \
-                 when left out.",
-            ),
-        ],
-    };
-
-    /// The schemes a Location's address is entered with to choose this technology.
-    const SCHEMES: &'static [&'static str] = &["azure-service-bus"];
+    const SETTINGS: &'static Settings = declaration::SETTINGS;
+    const SCHEMES: &'static [&'static str] = declaration::SCHEMES;
 
     /// The queue setting: the address names only the namespace.
     fn own_target(_address: &str) -> &str {
@@ -322,6 +323,7 @@ impl Configured for ServiceBusTransport {
     }
 }
 
+#[cfg(feature = "default")]
 impl ServiceBusTransport {
     /// Both ends on this machine: an ephemeral local port, one policy and
     /// key the far end expects and the near end signs with, the loopback
@@ -334,6 +336,7 @@ impl ServiceBusTransport {
     }
 }
 
+#[cfg(feature = "default")]
 impl Loopback for ServiceBusTransport {
     fn arrival_identity(&self) -> ArrivalIdentity {
         ArrivalIdentity::Unnamed("the queue delivers it: its properties say who sent it")
@@ -372,6 +375,7 @@ mod tests {
     use std::assert_matches;
     use std::thread::JoinHandle;
     use transport::Taken;
+    use xcore::settings::Applies;
 
     fn node(endpoint: &str, key: &str) -> ServiceBusTransport {
         ServiceBusTransport::new(endpoint, "orders")
